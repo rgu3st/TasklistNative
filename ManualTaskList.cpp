@@ -21,6 +21,7 @@ Help getting system token to read all data, from: https://0x00-0x00.github.io/re
 #include <tchar.h>
 #include <stdio.h>
 #include <psapi.h>
+#include <synchapi.h>
 
 // Forward declarations:
 BOOL GetProcessList();
@@ -41,32 +42,190 @@ const size_t maxCount = 1024;
 const TCHAR* lpcwstrLineDivider = TEXT("\n\n");
 DWORD dwLenLineDivider = wcsnlen_s(lpcwstrLineDivider, maxCount) * sizeof(WCHAR);
 BOOL ImpersonateProcessToken(DWORD PID);
+BOOL ResetProcessToken();
+DWORD GetPIDToTryAndImpersonate();
 void LpoverlappedCompletionRoutine(
 	DWORD dwErrorCode,
 	DWORD dwNumberOfBytesTransfered,
 	LPOVERLAPPED lpOverlapped
-)
-{/*Empty routine, don't care to handle OverlappedIO right now...*/ }
+){
+	/*Empty routine, don't care to handle OverlappedIO right now...*/ 
+}
 
 int failcount = 0;
 int goodcount = 0;
 
 int main(void)
 {
-
 	// For testing, get the PID which the user wants to try for privelege escalation:
-
-
-
-	BOOL result = GetProcessList();
+	DWORD pid = GetPIDToTryAndImpersonate();
+	BOOL result = ImpersonateProcessToken(pid);
+	result = GetProcessList();
+	result = ResetProcessToken();
 
 	printf("\nGood: %d \t Fail: %d", goodcount, failcount);
+
+	//quick pause
+	//Sleep(4000);
 	
 	if (TRUE == result) { 
 		return 0; 
 	}
 	else { 
 		return -1; 
+	}
+
+
+}
+
+DWORD GetPIDToTryAndImpersonate() {
+	DWORD ret = -1;
+
+	/*
+	PINPUT_RECORD inputRecord;
+	DWORD dwEventsRead = 0;
+	// HANDLE WINAPI GetStdHandle( _In_ DWORD nStdHandle);
+	HANDLE hStdin = INVALID_HANDLE_VALUE;
+	hStdin = GetStdHandle(STD_INPUT_HANDLE); // MSDN says no "CloseHandle()" required for this.
+	if (INVALID_HANDLE_VALUE == hStdin) {
+		printError((TCHAR*)TEXT("Couldn't get handle to standard input."));
+		return ret;
+	}
+
+
+	
+	//BOOL WINAPI ReadConsoleInputEx(
+	//  _In_  HANDLE        hConsoleInput,
+	//  _Out_ PINPUT_RECORD lpBuffer,
+	//  _In_  DWORD         nLength,
+	//  _Out_ LPDWORD       lpNumberOfEventsRead,
+	//  _In_  USHORT        wFlags
+	//);
+	BOOL ret = ReadConsoleInput(
+		hStdin,
+		inputRecord,
+		maxCount,
+		&dwEventsRead
+	);
+	*/
+
+	TCHAR lpwstrInput[maxCount] = { 0 };
+	printf("Enter a PID to use for token impersonation: ");
+	int result = wscanf_s( L"%s", (wchar_t*)lpwstrInput, (unsigned int) maxCount);
+	if (1 != result) {
+		printError((TCHAR*)TEXT("Error getting PID for token impersonation."));
+		return ret;	// I'm violating the concept of single in-out points from routines...
+	}
+
+	result = _wtoi((wchar_t*) lpwstrInput);
+	if (0 == result || INT_MAX == result || INT_MIN == result) {
+		printError((TCHAR*)TEXT("Error reading given PID for token impersonation. (Or input was '0'.)"));
+		return ret;
+	}
+
+	ret = result;
+
+	printf("Read PID: %d", ret);
+	return ret;
+}
+
+BOOL ImpersonateProcessToken(DWORD PID) {
+	HANDLE hProcToImpersonateToken = INVALID_HANDLE_VALUE;
+	HANDLE hDuplicatedTokenForUs = INVALID_HANDLE_VALUE;
+	//HANDLE hCurrentThread = GetCurrentThread();
+	HANDLE hSomeSystemProc = INVALID_HANDLE_VALUE;
+
+	//HANDLE OpenProcess(
+	//	[in] DWORD dwDesiredAccess,
+	//	[in] BOOL  bInheritHandle,
+	//	[in] DWORD dwProcessId
+	//);
+	HANDLE hProcToImpersonate = OpenProcess(
+		// PROCESS_QUERY_INFORMATION,
+		//| PROCESS_VM_READ,
+		PROCESS_QUERY_LIMITED_INFORMATION,
+		FALSE,
+		PID
+	);
+
+	if ( INVALID_HANDLE_VALUE == hProcToImpersonate || NULL == hProcToImpersonate) {
+		printError((TCHAR*)TEXT("Error getting proc handle for given PID."));
+		return FALSE;
+	}
+
+	//BOOL OpenProcessToken(
+	//	[in] HANDLE  ProcessHandle,
+	//	[in]  DWORD   DesiredAccess,
+	//	[out] PHANDLE TokenHandle
+	//	);
+	BOOL result = OpenProcessToken(
+		hProcToImpersonate,
+		TOKEN_IMPERSONATE | TOKEN_DUPLICATE | TOKEN_QUERY,
+		&hProcToImpersonateToken
+	);
+
+	if (INVALID_HANDLE_VALUE == hProcToImpersonateToken) {
+		printError((TCHAR*)TEXT("Error getting proc token for given PID."));
+		return FALSE;
+	}
+
+	//BOOL DuplicateToken(
+	//	[in] HANDLE                       ExistingTokenHandle,
+	//	[in]  SECURITY_IMPERSONATION_LEVEL ImpersonationLevel,
+	//	[out] PHANDLE                      DuplicateTokenHandle
+	//	);
+	// SecurityImpersonation: The server process can impersonate the client security context on its local system only.
+	_SECURITY_IMPERSONATION_LEVEL impersonationLevel = SecurityImpersonation;
+	result = DuplicateToken(
+		hProcToImpersonateToken,
+		impersonationLevel,
+		&hDuplicatedTokenForUs
+	);
+
+	if (INVALID_HANDLE_VALUE == hDuplicatedTokenForUs || FALSE == result) {
+		printError((TCHAR*)TEXT("Error duplicating proc token for given PID: %d", PID));
+		return FALSE;
+	}
+
+	result = SetThreadToken(
+		NULL, //If Thread is NULL, the function assigns the impersonation token to the calling thread. (MSDN)
+		hDuplicatedTokenForUs
+	);
+
+	if(FALSE == result) {
+		printError((TCHAR*)TEXT("Error setting duplicated token for this thread.", PID));
+		return FALSE;
+	}
+
+	// Now try to use the, hopefully, elevated privileges...
+	hSomeSystemProc = OpenProcess(
+		// PROCESS_QUERY_INFORMATION,
+		//| PROCESS_VM_READ,
+		PROCESS_QUERY_LIMITED_INFORMATION,
+		FALSE,
+		180  // "registry", on my machine right now
+	);
+
+	if (INVALID_HANDLE_VALUE == hSomeSystemProc || NULL == hSomeSystemProc) {
+		printError((TCHAR*)TEXT("Sad. I really hoped this would work."));
+		return FALSE;
+	}
+
+	
+
+	return TRUE;
+}
+
+BOOL ResetProcessToken() {
+	// Reset the thread's token
+	// If Token is NULL, the function causes the thread to stop using an impersonation token. (MSDN)
+	BOOL result = SetThreadToken(
+		NULL,
+		NULL
+	);
+	if (FALSE == result) {
+		printError((TCHAR*)TEXT("Error resetting or thread's token."));
+		return FALSE;
 	}
 }
 
@@ -249,12 +408,15 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 	// Print information about the memory usage of the process.
 
 	hProcess = OpenProcess(
-		PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+		PROCESS_QUERY_LIMITED_INFORMATION, // | PROCESS_VM_READ,
 		FALSE, 
 		pe32.th32ProcessID
 	);
 	if (NULL == hProcess) {
-		printError((TCHAR*)TEXT("Error getting handle to proc."));
+		//printError((TCHAR*)TEXT("Error getting handle to proc."));
+		if (180 == pe32.th32ProcessID) {
+			printf("Couldn't open process 180.");
+		}
 		failcount++;
 		return FALSE;
 	}
@@ -263,6 +425,7 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 	{
 		WriteLabel(TEXT("\nMem Usage: "), hFile);
 		goodcount++;
+
 		//pmc.WorkingSetSize
 		/*
 		printf("\tPageFaultCount: 0x%08X\n", pmc.PageFaultCount);
