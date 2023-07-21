@@ -1,17 +1,11 @@
 // ManualTaskList.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
-// 
-// 
-// 
-// 
-// 
-// From Ogden
+// Started by Ogden
 
 /*
 	NOTES:
 		* printError to be replace by our log statements. It's purely for seeing what is happening right now.
 		* Outputs will be changed to our own output once able.
-		* Will also add flags for setting once able.
+		* Flag to support verbose tasklist?
 		* 
 		* 
 Help getting system token to read all data, from: https://0x00-0x00.github.io/research/2018/10/21/Windows-API-And-Impersonation-Part-2.html
@@ -54,9 +48,9 @@ void LpoverlappedCompletionRoutine(
 ){
 	/*Empty routine, don't care to handle OverlappedIO right now...*/ 
 }
-
 int failcount = 0;
 int goodcount = 0;
+
 
 int main(void)
 {
@@ -68,50 +62,17 @@ int main(void)
 
 	printf("\nGood: %d \t Fail: %d", goodcount, failcount);
 
-	//quick pause
-	//Sleep(4000);
-	
 	if (TRUE == result) { 
 		return 0; 
 	}
 	else { 
 		return -1; 
 	}
-
-
 }
+
 
 DWORD GetPIDToTryAndImpersonate() {
 	DWORD ret = -1;
-
-	/*
-	PINPUT_RECORD inputRecord;
-	DWORD dwEventsRead = 0;
-	// HANDLE WINAPI GetStdHandle( _In_ DWORD nStdHandle);
-	HANDLE hStdin = INVALID_HANDLE_VALUE;
-	hStdin = GetStdHandle(STD_INPUT_HANDLE); // MSDN says no "CloseHandle()" required for this.
-	if (INVALID_HANDLE_VALUE == hStdin) {
-		printError((TCHAR*)TEXT("Couldn't get handle to standard input."));
-		return ret;
-	}
-
-
-	
-	//BOOL WINAPI ReadConsoleInputEx(
-	//  _In_  HANDLE        hConsoleInput,
-	//  _Out_ PINPUT_RECORD lpBuffer,
-	//  _In_  DWORD         nLength,
-	//  _Out_ LPDWORD       lpNumberOfEventsRead,
-	//  _In_  USHORT        wFlags
-	//);
-	BOOL ret = ReadConsoleInput(
-		hStdin,
-		inputRecord,
-		maxCount,
-		&dwEventsRead
-	);
-	*/
-
 	TCHAR lpwstrInput[maxCount] = { 0 };
 	printf("Enter a PID to use for token impersonation: ");
 	int result = wscanf_s( L"%s", (wchar_t*)lpwstrInput, (unsigned int) maxCount);
@@ -131,6 +92,7 @@ DWORD GetPIDToTryAndImpersonate() {
 	printf("Read PID: %d\n", ret);
 	return ret;
 }
+
 
 BOOL ImpersonateProcessToken(DWORD PID) {
 	HANDLE hProcToImpersonateToken = INVALID_HANDLE_VALUE;
@@ -200,24 +162,9 @@ BOOL ImpersonateProcessToken(DWORD PID) {
 		return FALSE;
 	}
 
-	// Now try to use the, hopefully, elevated privileges...
-	hSomeSystemProc = OpenProcess(
-		// PROCESS_QUERY_INFORMATION,
-		//| PROCESS_VM_READ,
-		PROCESS_QUERY_LIMITED_INFORMATION,
-		FALSE,
-		180  // "registry", on my machine right now
-	);
-
-	if (INVALID_HANDLE_VALUE == hSomeSystemProc || NULL == hSomeSystemProc) {
-		printError((TCHAR*)TEXT("Sad. I really hoped this would work."));
-		return FALSE;
-	}
-
-	
-
 	return TRUE;
 }
+
 
 BOOL ResetProcessToken() {
 	// Reset the thread's token
@@ -231,6 +178,7 @@ BOOL ResetProcessToken() {
 		return FALSE;
 	}
 }
+
 
 BOOL GetProcessList()
 {
@@ -273,61 +221,23 @@ BOOL GetProcessList()
 		return FALSE;
 	}
 
-
-	
-
-	//Now walk the snapshot of processes, and
-	//display information about each process in turn
+	// Walk the snapshot of processes, and display information about each process in turn
 	do
 	{
-		
-
 		WriteProcessName(pe32, hFile);
 		WriteProcessID(pe32, hFile);
 		WriteProcessSessionName(pe32, hFile);
 		WriteProcessSessionId(pe32, hFile);
 		WriteProcessMemUsage(pe32, hFile);
 		WriteAndIncrementFile(hFile, lpcwstrLineDivider, dwLenLineDivider);
-
-		/*
-		_tprintf(TEXT("\n\n====================================================="));
-		_tprintf(TEXT("\nProcess Name: %s"), pe32.szExeFile);
-		_tprintf(TEXT("\n-------------------------------------------------------"));
-
-		//Retrieve the priority class.
-		dwPriorityClass = 0;
-		hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pe32.th32ProcessID);
-		if (hProcess == NULL)
-		{
-			printError((TCHAR *) TEXT("OpenProcess"));
-		}
-		else
-		{
-			dwPriorityClass = GetPriorityClass(hProcess);
-			if (!dwPriorityClass) printError((TCHAR *) TEXT("GetPriorityClass"));
-			CloseHandle(hProcess);
-		}
-
-		_tprintf(TEXT("\n  Process ID        = 0x%08X"), pe32.th32ProcessID);
-		_tprintf(TEXT("\n  Thread count      = %d"), pe32.cntThreads);
-		_tprintf(TEXT("\n  Parent process ID = 0x%08X"), pe32.th32ParentProcessID);
-		_tprintf(TEXT("\n  Priority base     = %d"), pe32.pcPriClassBase);
-		if (dwPriorityClass)
-			_tprintf(TEXT("\n  Priority class    = %d"), dwPriorityClass);
-
-		ListProcessModules(pe32.th32ProcessID);
-		ListProcessThreads(pe32.th32ProcessID);
-		*/
-		
-
-	} while (Process32Next(hProcessSnap, &pe32));
+	} 
+	while (Process32Next(hProcessSnap, &pe32));
 
 	CloseHandle(hProcessSnap);
 	int closed = CloseHandle(hFile);
 	if (!closed) {
 		printError((TCHAR*)TEXT("Can't close file."));
 	}
-
 
 	return TRUE;
 }
@@ -357,6 +267,7 @@ BOOL WriteAndIncrementFile(HANDLE hFile, const TCHAR* DataBuffer, DWORD dwBytesT
 	return bErrorFlag;
 }
 
+
 BOOL WriteProcessName(PROCESSENTRY32 pe32, HANDLE hFile) {
 	DWORD dwBytesToWrite;
 	DWORD dwBytesWritten;
@@ -370,6 +281,7 @@ BOOL WriteProcessName(PROCESSENTRY32 pe32, HANDLE hFile) {
 
 	return bErrorFlag;  // This only takes the second function calls return into consideration...
 }
+
 
 BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile) {
 	DWORD dwBytesToWrite;
@@ -394,12 +306,14 @@ BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile) {
 	return bErrorFlag;  // This only takes the second function calls return into consideration...
 }
 
+
 BOOL WriteLabel(const TCHAR* lpcwstrLabel, HANDLE hFile) {
 	DWORD dwLabelSize = wcsnlen_s(lpcwstrLabel, maxCount) * sizeof(TCHAR);
 	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpcwstrLabel, dwLabelSize);
 
 	return TRUE;
 }
+
 
 BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 	// From https://learn.microsoft.com/en-us/windows/win32/psapi/collecting-memory-usage-information-for-a-process
@@ -479,6 +393,7 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 	return TRUE;
 }
 
+
 BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile) {
 	const TCHAR* lpwstrLabel = TEXT("\nSession #: ");
 	DWORD dwLabelSize = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
@@ -517,6 +432,7 @@ BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile) {
 	return bErrorFlag; // At least if we're ALL good to here, we'll return TRUE... 
 }
 
+
 BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
 	// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
 	//BOOL WTSQuerySessionInformationW(
@@ -535,8 +451,6 @@ BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
 	BOOL bErrorFlag = ProcessIdToSessionId(pe32.th32ProcessID, &dwSessionId);
 	if (FALSE == bErrorFlag)
 	{
-		//printError((TCHAR*)TEXT("ProcessIdToSessionId error.")); // Maybe use something like this if being verbose.
-		//return FALSE;
 		dwSessionId = dwUnknownId; // It looks like I can't get the ID for session 0, so I'll just assume that's what I have here??
 	}
 
@@ -548,10 +462,6 @@ BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
 		&bytesReturned
 	);
 
-	// I just used this for a quick test.
-	//if (TRUE == result) {
-		//wprintf_s(L"\noutBuffer: %s", lpwstrOutBuffer);
-	//} 
 	if (FALSE == result){
 		printError((TCHAR*)TEXT("Error getting session name."));
 	}
@@ -580,6 +490,7 @@ BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
 	return TRUE;
 }
 
+
 BOOL ListProcessModules(DWORD dwPID)
 {
 	HANDLE hModuleSnap = INVALID_HANDLE_VALUE;
@@ -596,8 +507,7 @@ BOOL ListProcessModules(DWORD dwPID)
 	//Set the size of the structure before using it.
 	me32.dwSize = sizeof(MODULEENTRY32);
 
-	//Retrieve information about the first module,
-	//and exit if unsuccessful
+	//Retrieve information about the first module, and exit if unsuccessful
 	if (!Module32First(hModuleSnap, &me32))
 	{
 		printError((TCHAR *) TEXT("Module32First"));
@@ -605,8 +515,7 @@ BOOL ListProcessModules(DWORD dwPID)
 		return FALSE;
 	}
 
-	//Now walk the module list of the process,
-	//and display information about each module
+	//Now walk the module list of the process, and display information about each module
 	do
 	{
 		_tprintf( TEXT("\n\n     MODULE NAME:     %s"), me32.szModule);
@@ -621,6 +530,7 @@ BOOL ListProcessModules(DWORD dwPID)
 	CloseHandle(hModuleSnap);
 	return TRUE;
 }
+
 
 BOOL ListProcessThreads(DWORD dwOwnerPID)
 {
@@ -643,9 +553,7 @@ BOOL ListProcessThreads(DWORD dwOwnerPID)
 		return FALSE;
 	}
 
-	//Now walk the thread list of the system,
-	//and display information about each thread
-	//associated with the specified process
+	// Walk the thread list of the system and display info about each thread associated with the specified process
 	do
 	{
 		if (te32.th32OwnerProcessID == dwOwnerPID)
@@ -660,6 +568,7 @@ BOOL ListProcessThreads(DWORD dwOwnerPID)
 	CloseHandle(hThreadSnap);
 	return TRUE;
 }
+
 
 void printError(TCHAR* msg)
 {
@@ -682,78 +591,4 @@ void printError(TCHAR* msg)
 	// Display the message
 	_tprintf(TEXT("\n  WARNING: %s failed with error %d (%s)"), msg, eNum, sysMsg);
 }
-
-// Base from: https://learn.microsoft.com/en-us/windows/win32/psapi/enumerating-all-processes
-/*
-#include <windows.h>
-#include <stdio.h>
-#include <tchar.h>
-#include <psapi.h>
-
-// To ensure correct resolution of symbols, add Psapi.lib to TARGETLIBS and compile with -DPSAPI_VERSION=1
-
-void PrintProcessNameAndID(DWORD processID)
-{
-    TCHAR szProcessName[MAX_PATH] = TEXT("<unknown>");
-
-    // Get a handle to the process.
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION |
-        PROCESS_VM_READ,
-        FALSE, processID);
-
-    // Get the process name.
-    if (NULL != hProcess)
-    {
-        HMODULE hMod;
-        DWORD cbNeeded;
-
-        if (EnumProcessModules(hProcess, &hMod, sizeof(hMod),
-            &cbNeeded))
-        {
-            GetModuleBaseName(hProcess, hMod, szProcessName,
-                sizeof(szProcessName) / sizeof(TCHAR));
-        }
-    }
-
-    // Print the process name and identifier.
-
-    _tprintf(TEXT("%s  (PID: %u)\n"), szProcessName, processID);
-
-    // Release the handle to the process.
-    if (hProcess != 0) {
-        CloseHandle(hProcess);
-    }
-}
-
-int main(void)
-{
-    // Get the list of process identifiers.
-    DWORD aProcesses[1024], cbNeeded, cProcesses;
-    unsigned int i;
-
-    if (!EnumProcesses(aProcesses, sizeof(aProcesses), &cbNeeded))
-    {
-        return 1;
-    }
-
-
-    // Calculate how many process identifiers were returned.
-    cProcesses = cbNeeded / sizeof(DWORD);
-
-    // Print the name and process identifier for each process.
-    for (i = 0; i < cProcesses; i++)
-    {
-        if (aProcesses[i] != 0)
-        {
-            PrintProcessNameAndID(aProcesses[i]);
-        }
-    }
-
-    //Quick hack to see result:
-    printf("Press any key when finished.");
-    getchar();
-
-    return 0;
-}
-*/
 
