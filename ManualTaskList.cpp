@@ -16,12 +16,14 @@
 		* 
 Help getting system token to read all data, from: https://0x00-0x00.github.io/research/2018/10/21/Windows-API-And-Impersonation-Part-2.html
 */
+
 #include <windows.h>
 #include <TlHelp32.h>
 #include <tchar.h>
 #include <stdio.h>
 #include <psapi.h>
 #include <synchapi.h>
+#include <wtsapi32.h>
 
 // Forward declarations:
 BOOL GetProcessList();
@@ -30,6 +32,7 @@ BOOL ListProcessThreads(DWORD dwOwnerPID);
 BOOL WriteProcessName(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteAndIncrementFile(HANDLE hFile, const TCHAR* DataBuffer, DWORD dwBytesToWrite);
 BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile);
+BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile);
 void printError(TCHAR* msg);
@@ -125,7 +128,7 @@ DWORD GetPIDToTryAndImpersonate() {
 
 	ret = result;
 
-	printf("Read PID: %d", ret);
+	printf("Read PID: %d\n", ret);
 	return ret;
 }
 
@@ -282,6 +285,7 @@ BOOL GetProcessList()
 		WriteProcessName(pe32, hFile);
 		WriteProcessID(pe32, hFile);
 		WriteProcessSessionName(pe32, hFile);
+		WriteProcessSessionId(pe32, hFile);
 		WriteProcessMemUsage(pe32, hFile);
 		WriteAndIncrementFile(hFile, lpcwstrLineDivider, dwLenLineDivider);
 
@@ -413,10 +417,7 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 		pe32.th32ProcessID
 	);
 	if (NULL == hProcess) {
-		//printError((TCHAR*)TEXT("Error getting handle to proc."));
-		if (180 == pe32.th32ProcessID) {
-			printf("Couldn't open process 180.");
-		}
+	
 		failcount++;
 		return FALSE;
 	}
@@ -426,30 +427,51 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 		WriteLabel(TEXT("\nMem Usage: "), hFile);
 		goodcount++;
 
+
 		//pmc.WorkingSetSize
-		/*
-		printf("\tPageFaultCount: 0x%08X\n", pmc.PageFaultCount);
-		printf("\tPeakWorkingSetSize: 0x%08X\n",
-			pmc.PeakWorkingSetSize);
-		printf("\tWorkingSetSize: 0x%08X\n", pmc.WorkingSetSize);
-		printf("\tQuotaPeakPagedPoolUsage: 0x%08X\n",
-			pmc.QuotaPeakPagedPoolUsage);
-		printf("\tQuotaPagedPoolUsage: 0x%08X\n",
-			pmc.QuotaPagedPoolUsage);
-		printf("\tQuotaPeakNonPagedPoolUsage: 0x%08X\n",
-			pmc.QuotaPeakNonPagedPoolUsage);
-		printf("\tQuotaNonPagedPoolUsage: 0x%08X\n",
-			pmc.QuotaNonPagedPoolUsage);
-		printf("\tPagefileUsage: 0x%08X\n", pmc.PagefileUsage);
-		printf("\tPeakPagefileUsage: 0x%08X\n",
-			pmc.PeakPagefileUsage);
-			*/
+		if (180 == pe32.th32ProcessID) {
+			printf("Mem usage for proc id 180:\n");
+			printf("\tPageFaultCount: %d K\n", pmc.PageFaultCount/1000);
+			printf("\tPeakWorkingSetSize: %d K\n", pmc.PeakWorkingSetSize /1000);
+			printf("\tWorkingSetSize: %d K\n", pmc.WorkingSetSize / 1000);
+			printf("\tQuotaPeakPagedPoolUsage: %d K\n", pmc.QuotaPeakPagedPoolUsage / 1000);
+			printf("\tQuotaPagedPoolUsage: %d K\n", pmc.QuotaPagedPoolUsage / 1000);
+			printf("\tQuotaPeakNonPagedPoolUsage: %d K\n", pmc.QuotaPeakNonPagedPoolUsage / 1000);
+			printf("\tQuotaNonPagedPoolUsage: %d K\n", pmc.QuotaNonPagedPoolUsage / 1000);
+			printf("\tPagefileUsage: %d K\n", pmc.PagefileUsage / 1000);
+			printf("\tPeakPagefileUsage: %d K\n", pmc.PeakPagefileUsage / 1000);
+		}
 	}
 	else {
-		//printError((TCHAR*)TEXT("Error getting process mem usage."));
+		printError((TCHAR*)TEXT("Error getting process mem usage."));
 		
 	}
 
+	DWORD dwWorkingSetKs = pmc.WorkingSetSize / 1000;
+	DWORD dwWorkingSetKsSize = 0;
+	TCHAR lpwstrSessionID[maxCount] = { 0 };
+	errno_t errNo = _itow_s((int)dwWorkingSetKs, (wchar_t*)lpwstrSessionID, maxCount, 10);
+	if (errNo != 0) {
+		printError((TCHAR*)TEXT("Errno not zero after saving session ID to buffer."));
+	}
+
+	const TCHAR * lpwstrUnit = TEXT(" K");
+	dwWorkingSetKsSize = wcsnlen_s(lpwstrSessionID, maxCount) * sizeof(TCHAR);
+	size_t numElementsSessionID = wcsnlen_s(lpwstrSessionID, maxCount);
+	size_t numElementsUnits = +wcsnlen_s(lpwstrUnit, maxCount);
+	size_t numElements = numElementsSessionID + numElementsUnits;
+	errNo = wcscat_s(
+		(wchar_t*) lpwstrSessionID,
+		maxCount,
+		(wchar_t*) lpwstrUnit
+	);  // Apparently, I have to manually null-terminate the string after concatonating!?
+	if (errNo != 0) {
+		printError((TCHAR*)TEXT("Errno not zero after adding units to buffer."));
+	}
+
+	dwWorkingSetKsSize = wcsnlen_s(lpwstrSessionID, maxCount) * sizeof(TCHAR);
+
+	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpwstrSessionID, dwWorkingSetKsSize);
 	
 
 	CloseHandle(hProcess);
@@ -457,7 +479,7 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 	return TRUE;
 }
 
-BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
+BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile) {
 	const TCHAR* lpwstrLabel = TEXT("\nSession #: ");
 	DWORD dwLabelSize = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
 	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelSize);
@@ -493,6 +515,69 @@ BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
 	
 
 	return bErrorFlag; // At least if we're ALL good to here, we'll return TRUE... 
+}
+
+BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
+	// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
+	//BOOL WTSQuerySessionInformationW(
+	//	[in] HANDLE         hServer,
+	//	[in]  DWORD          SessionId,
+	//	[in]  WTS_INFO_CLASS WTSInfoClass,
+	//	[out] LPWSTR  *        ppBuffer,
+	//	[out] DWORD* pBytesReturned
+	//	);
+
+	DWORD dwSessionId = 0;
+	DWORD bytesReturned = 0;
+	WTS_INFO_CLASS wtsInfo = WTSWinStationName;
+	TCHAR* lpwstrOutBuffer;
+	const DWORD dwUnknownId = -1;
+	BOOL bErrorFlag = ProcessIdToSessionId(pe32.th32ProcessID, &dwSessionId);
+	if (FALSE == bErrorFlag)
+	{
+		//printError((TCHAR*)TEXT("ProcessIdToSessionId error.")); // Maybe use something like this if being verbose.
+		//return FALSE;
+		dwSessionId = dwUnknownId; // It looks like I can't get the ID for session 0, so I'll just assume that's what I have here??
+	}
+
+	BOOL result = WTSQuerySessionInformationW(
+		WTS_CURRENT_SERVER_HANDLE,
+		dwSessionId,
+		wtsInfo,
+		(LPWSTR*) &lpwstrOutBuffer,
+		&bytesReturned
+	);
+
+	// I just used this for a quick test.
+	//if (TRUE == result) {
+		//wprintf_s(L"\noutBuffer: %s", lpwstrOutBuffer);
+	//} 
+	if (FALSE == result){
+		printError((TCHAR*)TEXT("Error getting session name."));
+	}
+
+	const TCHAR* lpwstrLabel = TEXT("\nSession Name: ");
+	DWORD dwLabelSize = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelSize);
+	if (FALSE == bErrorFlag) {
+		printError((TCHAR*)TEXT("Error writing label for session name."));
+		return FALSE;
+	}
+
+	DWORD dwSessionNameSize = wcsnlen_s(lpwstrOutBuffer, maxCount) * sizeof(TCHAR);
+	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrOutBuffer, dwSessionNameSize);
+	if (FALSE == bErrorFlag) {
+		printError((TCHAR*)TEXT("Error writing session name."));
+		return FALSE;
+	}
+
+	// MSDN says to use this to free the out buffer:
+	WTSFreeMemory(
+		(PVOID) lpwstrOutBuffer
+	);
+
+
+	return TRUE;
 }
 
 BOOL ListProcessModules(DWORD dwPID)
