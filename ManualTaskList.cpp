@@ -21,6 +21,7 @@ Help getting system token to read all data, from: https://0x00-0x00.github.io/re
 
 // Forward declarations:
 BOOL GetProcessList();
+int GetPIDFromProcessName(const TCHAR* lpwstrProcName);  // return of 0 is a "bad" value.
 BOOL ListProcessModules(DWORD dwPID);
 BOOL ListProcessThreads(DWORD dwOwnerPID);
 BOOL WriteProcessName(PROCESSENTRY32 pe32, HANDLE hFile);
@@ -29,10 +30,11 @@ BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile);
+BOOL CheckProcessNameForPID(PROCESSENTRY32 pe32, const TCHAR* lpwstrProcName);
 void printError(TCHAR* msg);
 
 // Globals:
-TCHAR * filepath = (TCHAR *) TEXT("C:\\Users\\robgu\\OneDrive\\Documents\\AirForce\\90COS\\ManualTaskList\\testoutput.txt");
+const TCHAR * filepath = TEXT("C:\\Users\\robgu\\OneDrive\\Documents\\AirForce\\90COS\\ManualTaskList\\testoutput.txt");
 HANDLE hFile = NULL;
 OVERLAPPED OverlappedIO;
 const size_t maxCount = 1024;
@@ -73,6 +75,9 @@ int main(void)
 
 DWORD GetPIDToTryAndImpersonate() {
 	DWORD ret = -1;
+
+	/* 
+	// Getting PID from user via terminal:
 	TCHAR lpwstrInput[maxCount] = { 0 };
 	printf("Enter a PID to use for token impersonation: ");
 	int result = wscanf_s( L"%s", (wchar_t*)lpwstrInput, (unsigned int) maxCount);
@@ -90,6 +95,12 @@ DWORD GetPIDToTryAndImpersonate() {
 	ret = result;
 
 	printf("Read PID: %d\n", ret);
+	*/
+
+	//Instead, looking for "winlogon.exe" automatically. // TODO: test this on all likely machines
+	const TCHAR* lpwstrProcessNameToImpersonate = L"winlogon.exe";
+	ret = GetPIDFromProcessName(lpwstrProcessNameToImpersonate);
+
 	return ret;
 }
 
@@ -163,6 +174,57 @@ BOOL ImpersonateProcessToken(DWORD PID) {
 	}
 
 	return TRUE;
+}
+
+
+int GetPIDFromProcessName(const TCHAR* lpwstrProcName) {
+	int winlogonPID = 0;
+	HANDLE hProcessSnap;
+	HANDLE hProcess;
+	PROCESSENTRY32 pe32;
+	DWORD dwPriorityClass;
+
+	//Take a snapshot of all processes in the system.
+	hProcessSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (hProcessSnap == INVALID_HANDLE_VALUE)
+	{
+		printError((TCHAR*)TEXT("CreateToolhelp32Snapshot (of processes)"));
+		return FALSE;
+	}
+
+	//Set the size of the structure before using it.
+	pe32.dwSize = sizeof(PROCESSENTRY32);
+
+	//Retrieve information about the first process and exit if unsuccessful
+	if (!Process32First(hProcessSnap, &pe32))
+	{
+		printError((TCHAR*)TEXT("Process32First"));
+		CloseHandle(hProcessSnap);
+		return FALSE;
+	}
+
+	// Walk the snapshot of processes, and check the name of each for "winlogon.exe"
+	do
+	{
+		if (CheckProcessNameForPID(pe32, lpwstrProcName)) {
+			winlogonPID = pe32.th32ProcessID;
+			break;
+		}
+	} while (Process32Next(hProcessSnap, &pe32));
+
+
+	return winlogonPID;
+}
+
+BOOL CheckProcessNameForPID(PROCESSENTRY32 pe32, const TCHAR* lpwstrProcName)
+{
+	BOOL ret = FALSE;
+	int result = wcscmp(lpwstrProcName, pe32.szExeFile);
+	if(0 == result){
+		ret = TRUE;
+	}
+
+	return ret;
 }
 
 
