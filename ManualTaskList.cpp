@@ -25,7 +25,7 @@ int GetPIDFromProcessName(const TCHAR* lpwstrProcName);  // return of 0 is a "ba
 BOOL ListProcessModules(DWORD dwPID);
 BOOL ListProcessThreads(DWORD dwOwnerPID);
 BOOL WriteProcessName(PROCESSENTRY32 pe32, HANDLE hFile);
-BOOL WriteAndIncrementFile(HANDLE hFile, const TCHAR* DataBuffer, DWORD dwBytesToWrite);
+BOOL WriteAndIncrementFile(HANDLE hFile, const TCHAR* DataBuffer, DWORD dwBytesToWrite, OVERLAPPED* overlappedIO);
 BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile);
@@ -33,10 +33,13 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile);
 BOOL CheckProcessNameForPID(PROCESSENTRY32 pe32, const TCHAR* lpwstrProcName);
 void printError(TCHAR* msg);
 
+//Next section:
+BOOL SaveNetUserInfo(const TCHAR* savePath);
+
 // Globals:
 const TCHAR * filepath = TEXT("C:\\Users\\robgu\\OneDrive\\Documents\\AirForce\\90COS\\ManualTaskList\\testoutput.txt");
 HANDLE hFile = NULL;
-OVERLAPPED OverlappedIO;
+OVERLAPPED OverlappedIOTasklist;
 const size_t maxCount = 1024;
 const TCHAR* lpcwstrLineDivider = TEXT("\n\n");
 DWORD dwLenLineDivider = wcsnlen_s(lpcwstrLineDivider, maxCount) * sizeof(WCHAR);
@@ -52,17 +55,26 @@ void LpoverlappedCompletionRoutine(
 }
 int failcount = 0;
 int goodcount = 0;
+// quser:
+OVERLAPPED OverlappedIOQUser;
 
 
 int main(void)
 {
-	// For testing, get the PID which the user wants to try for privelege escalation:
+	BOOL result = FALSE;
+	
 	DWORD pid = GetPIDToTryAndImpersonate();
-	BOOL result = ImpersonateProcessToken(pid);
-	result = GetProcessList();
-	result = ResetProcessToken();
+	//result = ImpersonateProcessToken(pid);
+	//result = GetProcessList();
 
-	printf("\nGood: %d \t Fail: %d", goodcount, failcount);
+	result = SaveNetUserInfo(L"C:\\Users\\robgu\\OneDrive\\Documents\\AirForce\\90COS\\ManualTaskList\\netUserOutput.txt");
+
+	result = ResetProcessToken();
+	
+
+	
+
+	//Sprintf("\nGood: %d \t Fail: %d", goodcount, failcount);
 
 	if (TRUE == result) { 
 		return 0; 
@@ -70,6 +82,140 @@ int main(void)
 	else { 
 		return -1; 
 	}
+}
+
+// This include is only needed for this part...
+//#include <lmaccess.h>
+#include <lm.h>
+BOOL SaveNetUserInfo(const TCHAR* savePath) {
+	// Local Vars:
+	NET_DISPLAY_USER * pNDUserBuff, * p;
+	DWORD dwReturnedEntryCount = 0;
+	const TCHAR* lpwstrLabel;
+	DWORD dwLabelLen;
+
+	HANDLE hFile = CreateFile(
+		savePath,                // name of the write
+		GENERIC_WRITE,          // open for writing
+		0,                      // do not share
+		NULL,                   // default security
+		CREATE_ALWAYS,             // create or open
+		FILE_ATTRIBUTE_NORMAL,  // normal file
+		NULL);
+
+	if (hFile == INVALID_HANDLE_VALUE) {
+		printError((TCHAR*)TEXT("CreateFile"));
+		_tprintf(TEXT("SaveNetUserInfo fail: Unable to open file \"%s\" for write.\n"), savePath);
+		return FALSE;
+	}
+
+	//NET_API_STATUS NET_API_FUNCTION NetQueryDisplayInformation(
+	//	[in] LPCWSTR ServerName,
+	//	[in]  DWORD   Level,
+	//	[in]  DWORD   Index,
+	//	[in]  DWORD   EntriesRequested,
+	//	[in]  DWORD   PreferredMaximumLength,
+	//	[out] LPDWORD ReturnedEntryCount,
+	//	[out] PVOID* SortedBuffer
+	//	);
+
+	DWORD status, index = 0;
+
+	do{
+		status = NetQueryDisplayInformation(
+			NULL,					// NULL queries local machine
+			1,						//Return user account information. 
+			index,
+			100,					// Maximum number of returns on Windows 2k and later
+			MAX_PREFERRED_LENGTH,	// Preferred max of system-allocated buffer for SortedBuffer
+			&dwReturnedEntryCount,  // Num returns
+			(PVOID*) &pNDUserBuff
+		);
+
+		if ((status == ERROR_SUCCESS) || (status == ERROR_MORE_DATA))
+		{
+			p = pNDUserBuff;
+			for (; dwReturnedEntryCount > 0; dwReturnedEntryCount--)
+			{
+				//
+				// Print the retrieved group information.
+				//
+				printf("User Name:      %S\n"
+					"Full Name:		%S\n"
+					"Comment:   %S\n"
+					"User ID:  %u\n"
+					"Flags: %u\n"
+					"--------------------------------\n",
+					p->usri1_name,
+					p->usri1_full_name,
+					p->usri1_comment,
+					p->usri1_user_id,
+					p->usri1_flags
+					
+				);
+
+				// Username
+				lpwstrLabel = TEXT("\nUsername: ");
+				dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
+				DWORD dwUserNameLen = wcsnlen_s(p->usri1_name, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, p->usri1_name, dwUserNameLen, &OverlappedIOQUser);
+
+				// Full name:
+				lpwstrLabel = TEXT("\nFull Name: ");
+				DWORD dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
+				DWORD dwFullNameLen = wcsnlen_s(p->usri1_full_name, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, p->usri1_full_name, dwFullNameLen, &OverlappedIOQUser);
+
+				//
+				// If there is more data, set the index.
+				//
+				index = p->usri1_next_index;
+				p++;
+			}
+			//
+			// Free the allocated memory.
+			//
+			NetApiBufferFree(pNDUserBuff);
+		}
+		else
+			printf("Error: %u\n", status);
+		//
+		// Continue while there is more data.
+		//
+	} while (status == ERROR_MORE_DATA); // end do
+
+
+
+
+	/*
+		if (ERROR_SUCCESS != status) {
+			printError((TCHAR*)TEXT("Error calling NetQueryDisplayInformation."));
+			return FALSE;
+		}
+		//Printing all of the following from NET_DISPLAY_USER:
+		// LPWSTR usri1_name;
+		// LPWSTR usri1_comment;
+		// DWORD  usri1_flags;
+		// LPWSTR usri1_full_name;
+		// DWORD  usri1_user_id;
+		for (int i = 0; i < dwReturnedEntryCount; i++) {
+			NET_DISPLAY_USER thisNetDisplayUser = ndUser[i];
+
+			wprintf(L"\nFound username: %s", ndUser->usri1_name);
+
+			const TCHAR* lpwstrLabel = TEXT("\nUsername: ");
+			DWORD dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+			WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
+
+			DWORD dwUserNameLen = wcsnlen_s(thisNetDisplayUser.usri1_name, maxCount) * sizeof(TCHAR);
+			WriteAndIncrementFile(hFile, thisNetDisplayUser.usri1_name, dwUserNameLen, &OverlappedIOQUser);
+		} 
+		*/
+
+
+	return TRUE;
 }
 
 
@@ -291,7 +437,7 @@ BOOL GetProcessList()
 		WriteProcessSessionName(pe32, hFile);
 		WriteProcessSessionId(pe32, hFile);
 		WriteProcessMemUsage(pe32, hFile);
-		WriteAndIncrementFile(hFile, lpcwstrLineDivider, dwLenLineDivider);
+		WriteAndIncrementFile(hFile, lpcwstrLineDivider, dwLenLineDivider, &OverlappedIOTasklist);
 	} 
 	while (Process32Next(hProcessSnap, &pe32));
 
@@ -305,7 +451,7 @@ BOOL GetProcessList()
 }
 
 
-BOOL WriteAndIncrementFile(HANDLE hFile, const TCHAR* DataBuffer, DWORD dwBytesToWrite) {
+BOOL WriteAndIncrementFile(HANDLE hFile, const TCHAR* DataBuffer, DWORD dwBytesToWrite, OVERLAPPED* overlappedIO) {
 
 	if (INVALID_HANDLE_VALUE == hFile || NULL == DataBuffer) {
 		//printError((TCHAR*)TEXT("Invalid parameters passed to WriteAndIncrementFile.")); 
@@ -316,10 +462,10 @@ BOOL WriteAndIncrementFile(HANDLE hFile, const TCHAR* DataBuffer, DWORD dwBytesT
 		hFile,							// Handle to open file 
 		DataBuffer,						// pointer to start of data to write
 		dwBytesToWrite,					// number of bytes to write
-		&OverlappedIO,					// LP Overlapped
+		overlappedIO,					// LP Overlapped
 		LpoverlappedCompletionRoutine);	// Unused here
 
-	OverlappedIO.Offset += dwBytesToWrite;	// And increment offset, so we can append more data
+	overlappedIO->Offset += dwBytesToWrite;	// And increment offset, so we can append more data
 
 	if (FALSE == bErrorFlag)
 	{
@@ -336,10 +482,10 @@ BOOL WriteProcessName(PROCESSENTRY32 pe32, HANDLE hFile) {
 
 	const TCHAR* DataBuffer = TEXT("\nProcess Name: ");
 	dwBytesToWrite = wcsnlen_s(DataBuffer, maxCount) * sizeof(WCHAR); 
-	BOOL bErrorFlag = WriteAndIncrementFile( hFile, DataBuffer, dwBytesToWrite );
+	BOOL bErrorFlag = WriteAndIncrementFile( hFile, DataBuffer, dwBytesToWrite, &OverlappedIOTasklist);
 
 	size_t procNameLen = wcsnlen_s(pe32.szExeFile, maxCount) * sizeof(WCHAR);
-	bErrorFlag = WriteAndIncrementFile( hFile, pe32.szExeFile, procNameLen );
+	bErrorFlag = WriteAndIncrementFile( hFile, pe32.szExeFile, procNameLen, &OverlappedIOTasklist);
 
 	return bErrorFlag;  // This only takes the second function calls return into consideration...
 }
@@ -351,7 +497,7 @@ BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile) {
 
 	const TCHAR* DataBuffer = TEXT("\nProcess Id: ");
 	dwBytesToWrite = wcsnlen_s(DataBuffer, maxCount) * sizeof(WCHAR);
-	BOOL bErrorFlag = WriteAndIncrementFile(hFile, DataBuffer, dwBytesToWrite);
+	BOOL bErrorFlag = WriteAndIncrementFile(hFile, DataBuffer, dwBytesToWrite, &OverlappedIOTasklist);
 
 	TCHAR lpwstrPID [maxCount];
 	DWORD dwPIDSize = -1;
@@ -363,7 +509,7 @@ BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile) {
 	dwPIDSize = wcsnlen_s(lpwstrPID, maxCount) * sizeof(TCHAR);
 
 	size_t procNameLen = wcsnlen_s(lpwstrPID, maxCount) * sizeof(WCHAR);
-	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrPID, procNameLen);
+	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrPID, procNameLen, &OverlappedIOTasklist);
 
 	return bErrorFlag;  // This only takes the second function calls return into consideration...
 }
@@ -371,7 +517,7 @@ BOOL WriteProcessID(PROCESSENTRY32 pe32, HANDLE hFile) {
 
 BOOL WriteLabel(const TCHAR* lpcwstrLabel, HANDLE hFile) {
 	DWORD dwLabelSize = wcsnlen_s(lpcwstrLabel, maxCount) * sizeof(TCHAR);
-	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpcwstrLabel, dwLabelSize);
+	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpcwstrLabel, dwLabelSize, &OverlappedIOTasklist);
 
 	return TRUE;
 }
@@ -447,7 +593,7 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 
 	dwWorkingSetKsSize = wcsnlen_s(lpwstrSessionID, maxCount) * sizeof(TCHAR);
 
-	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpwstrSessionID, dwWorkingSetKsSize);
+	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpwstrSessionID, dwWorkingSetKsSize, &OverlappedIOTasklist);
 	
 
 	CloseHandle(hProcess);
@@ -459,7 +605,7 @@ BOOL WriteProcessMemUsage(PROCESSENTRY32 pe32, HANDLE hFile) {
 BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile) {
 	const TCHAR* lpwstrLabel = TEXT("\nSession #: ");
 	DWORD dwLabelSize = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
-	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelSize);
+	BOOL bErrorFlag = WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelSize, &OverlappedIOTasklist);
 	
 	DWORD dwSessionId;
 	const DWORD dwUnknownId = -1;
@@ -476,7 +622,7 @@ BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile) {
 	if (dwUnknownId == dwSessionId) {
 		lpwstrSessionID = (TCHAR *) TEXT("Unknown");
 		dwSessionIDSize = wcsnlen_s(lpwstrSessionID, maxCount) * sizeof(TCHAR);
-		bErrorFlag = WriteAndIncrementFile(hFile, lpwstrSessionID, dwSessionIDSize);
+		bErrorFlag = WriteAndIncrementFile(hFile, lpwstrSessionID, dwSessionIDSize, &OverlappedIOTasklist);
 	}
 	else {
 		TCHAR lpwstrSessionID[maxCount];
@@ -486,7 +632,7 @@ BOOL WriteProcessSessionId(PROCESSENTRY32 pe32, HANDLE hFile) {
 		}
 		dwSessionIDSize = wcsnlen_s(lpwstrSessionID, maxCount) * sizeof(TCHAR);
 		//printf("lpwstrSessionId: %s", lpwstrSessionID);
-		bErrorFlag = WriteAndIncrementFile(hFile, lpwstrSessionID, dwSessionIDSize);
+		bErrorFlag = WriteAndIncrementFile(hFile, lpwstrSessionID, dwSessionIDSize, &OverlappedIOTasklist);
 	}
 	
 	
@@ -530,14 +676,14 @@ BOOL WriteProcessSessionName(PROCESSENTRY32 pe32, HANDLE hFile) {
 
 	const TCHAR* lpwstrLabel = TEXT("\nSession Name: ");
 	DWORD dwLabelSize = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
-	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelSize);
+	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelSize, &OverlappedIOTasklist);
 	if (FALSE == bErrorFlag) {
 		printError((TCHAR*)TEXT("Error writing label for session name."));
 		return FALSE;
 	}
 
 	DWORD dwSessionNameSize = wcsnlen_s(lpwstrOutBuffer, maxCount) * sizeof(TCHAR);
-	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrOutBuffer, dwSessionNameSize);
+	bErrorFlag = WriteAndIncrementFile(hFile, lpwstrOutBuffer, dwSessionNameSize, &OverlappedIOTasklist);
 	if (FALSE == bErrorFlag) {
 		printError((TCHAR*)TEXT("Error writing session name."));
 		return FALSE;
