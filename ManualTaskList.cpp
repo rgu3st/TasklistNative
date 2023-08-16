@@ -18,6 +18,7 @@ Help getting system token to read all data, from: https://0x00-0x00.github.io/re
 #include <psapi.h>
 #include <synchapi.h>
 #include <wtsapi32.h>
+#include <time.h>
 
 // Forward declarations:
 BOOL GetProcessList();
@@ -64,7 +65,7 @@ int main(void)
 	BOOL result = FALSE;
 	
 	DWORD pid = GetPIDToTryAndImpersonate();
-	//result = ImpersonateProcessToken(pid);
+	result = ImpersonateProcessToken(pid);
 	//result = GetProcessList();
 
 	result = SaveNetUserInfo(L"C:\\Users\\robgu\\OneDrive\\Documents\\AirForce\\90COS\\ManualTaskList\\netUserOutput.txt");
@@ -88,15 +89,48 @@ int main(void)
 // This include is only needed for this part...
 //#include <lmaccess.h>
 #include <lm.h>
+/*typedef struct _USER_INFO_2 {
+  LPWSTR usri2_name;
+  LPWSTR usri2_password;
+  DWORD  usri2_password_age;
+  DWORD  usri2_priv;
+  LPWSTR usri2_home_dir;
+  LPWSTR usri2_comment;
+  DWORD  usri2_flags;
+  LPWSTR usri2_script_path;
+  DWORD  usri2_auth_flags;
+  LPWSTR usri2_full_name;
+  LPWSTR usri2_usr_comment;
+  LPWSTR usri2_parms;
+  LPWSTR usri2_workstations;
+  DWORD  usri2_last_logon;
+  DWORD  usri2_last_logoff;
+  DWORD  usri2_acct_expires;
+  DWORD  usri2_max_storage;
+  DWORD  usri2_units_per_week;
+  PBYTE  usri2_logon_hours;
+  DWORD  usri2_bad_pw_count;
+  DWORD  usri2_num_logons;
+  LPWSTR usri2_logon_server;
+  DWORD  usri2_country_code;
+  DWORD  usri2_code_page;
+} USER_INFO_2, *PUSER_INFO_2, *LPUSER_INFO_2;*/
 BOOL SaveNetUserInfo(const TCHAR* savePath) {
 	// Local Vars:
 	NET_DISPLAY_USER * pNDUserBuff, * p;
+	//USER_INFO_2 userInfo2;
+	LPBYTE* userInfo2 = (LPBYTE*) calloc(1, sizeof(USER_INFO_2));
+	DWORD dwUserInfoLevel2 = 2;
+	SESSION_INFO_502 si502;
 	DWORD dwReturnedEntryCount = 0;
 	const TCHAR* lpwstrLabel;
 	const TCHAR lpwstrAttr[1024] = { 0 };
 	DWORD dwLabelLen = 0;
 	DWORD dwAttrLen = 0;
 	errno_t errNo = 0;
+	char timebuf[26];
+	struct tm gmt = { 0,0,0,0,0,0 };
+	time_t ltime;
 
 	HANDLE hFile = CreateFile(
 		savePath,                // name of the write
@@ -144,12 +178,14 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 				//
 				// Print the retrieved group information.
 				//
-				printf("User Name:      %S\n"
+				printf(
+					"--------------------------------\n"
+					"User Name:      %S\n"
 					"Full Name:		%S\n"
 					"Comment:   %S\n"
 					"User ID:  %u\n"
 					"Flags: %u\n"
-					"--------------------------------\n",
+					,
 					p->usri1_name,
 					p->usri1_full_name,
 					p->usri1_comment,
@@ -157,6 +193,84 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 					p->usri1_flags
 					
 				);
+
+
+				/*NET_API_STATUS NET_API_FUNCTION NetUserGetInfo(
+					[in]  LPCWSTR servername,
+					[in]  LPCWSTR username,
+					[in]  DWORD   level,
+					[out] LPBYTE * bufptr
+				);*/
+				// Get some more information once we have the username:
+				status = NetUserGetInfo(
+					NULL,		// NULL queries local machine,
+					p->usri1_name,
+					dwUserInfoLevel2,
+					(LPBYTE*)&userInfo2		// Docs say this is allocated by the system. Call NetApiBufferFree to free
+				);
+				if (ERROR_SUCCESS != status) {
+					printf("\nBad call to NetUserGetInfo.");
+				}
+				else {
+					USER_INFO_2* ui2 = (USER_INFO_2*)userInfo2;
+
+					// Display UTC.
+					ltime = ui2->usri2_last_logon;
+					errNo = _gmtime64_s(&gmt, &ltime);
+					if (errNo)
+					{
+						printf("_gmtime64_s failed due to an invalid argument.");
+					}
+					errNo = asctime_s(timebuf, 26, &gmt);
+					if (errNo)
+					{
+						printf("asctime_s failed due to an invalid argument.");
+						exit(1);
+					}
+					//printf("Last Logon in Coordinated universal time:\t\t%s", timebuf);
+					
+					
+					wprintf(L"\n** UI2 INFO **\n");
+					wprintf(L"Name: %s\n", ui2->usri2_name);
+					wprintf(L"Password: %s\n", ui2->usri2_password);
+					wprintf(L"Pass age: %u\n", ui2->usri2_password_age);
+					wprintf(L"Privelage level: %u\n", ui2->usri2_priv);
+					wprintf(L"HomeDir: %s\n", ui2->usri2_home_dir);
+					wprintf(L"Comment: %s\n", ui2->usri2_comment);
+					wprintf(L"Flags: %u\n", ui2->usri2_flags);
+					wprintf(L"ScriptPath: %s\n", ui2->usri2_script_path);
+					wprintf(L"Auth Flags: %u\n", ui2 ->usri2_auth_flags );
+					wprintf(L"FullName: %s\n", ui2->usri2_full_name);
+					wprintf(L"User Comment: %s\n", ui2 ->usri2_comment );
+					wprintf(L"Parms: %s\n", ui2 ->usri2_parms );
+					wprintf(L"Workstations: %s\n", ui2 ->usri2_workstations );
+					printf("Last logon: %s", timebuf);
+					wprintf(L"Last logoff: %u\n", ui2->usri2_last_logoff);
+					wprintf(L"Account Expires: %u\n", ui2->usri2_acct_expires );
+					wprintf(L"Max Storage: %u\n", ui2->usri2_max_storage );
+					wprintf(L"Units per week: %u\n", ui2->usri2_units_per_week );
+					wprintf(L"Logon hours: %u\n", *ui2->usri2_logon_hours );
+					wprintf(L"Bad password count: %u\n", ui2->usri2_bad_pw_count );
+					wprintf(L"Num Logons: %u\n", ui2->usri2_num_logons );
+					wprintf(L"Logon server: %s\n", ui2->usri2_logon_server );
+					wprintf(L"Country Code: %u\n", ui2 ->usri2_country_code );
+					wprintf(L"Code Page: %u\n", ui2->usri2_code_page );
+				}
+
+
+				/*NET_API_STATUS NET_API_FUNCTION NetSessionEnum(
+							  [in]      LMSTR   servername,
+							  [in]      LMSTR   UncClientName,
+							  [in]      LMSTR   username,
+							  [in]      DWORD   level,
+							  [out]     LPBYTE  *bufptr,
+							  [in]      DWORD   prefmaxlen,
+							  [out]     LPDWORD entriesread,
+							  [out]     LPDWORD totalentries,
+							  [in, out] LPDWORD resume_handle
+				);*/
+
+
 
 				// Username
 				lpwstrLabel = TEXT("\n\nUsername: ");
@@ -212,6 +326,7 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 			// Free the allocated memory.
 			//
 			NetApiBufferFree(pNDUserBuff);
+			NetApiBufferFree(userInfo2);
 		}
 		else
 			printf("Error: %u\n", status);
