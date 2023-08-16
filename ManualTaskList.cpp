@@ -84,6 +84,7 @@ int main(void)
 	}
 }
 
+
 // This include is only needed for this part...
 //#include <lmaccess.h>
 #include <lm.h>
@@ -92,7 +93,10 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 	NET_DISPLAY_USER * pNDUserBuff, * p;
 	DWORD dwReturnedEntryCount = 0;
 	const TCHAR* lpwstrLabel;
-	DWORD dwLabelLen;
+	const TCHAR lpwstrAttr[1024] = { 0 };
+	DWORD dwLabelLen = 0;
+	DWORD dwAttrLen = 0;
+	errno_t errNo = 0;
 
 	HANDLE hFile = CreateFile(
 		savePath,                // name of the write
@@ -155,18 +159,48 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 				);
 
 				// Username
-				lpwstrLabel = TEXT("\nUsername: ");
+				lpwstrLabel = TEXT("\n\nUsername: ");
 				dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
 				WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
-				DWORD dwUserNameLen = wcsnlen_s(p->usri1_name, maxCount) * sizeof(TCHAR);
-				WriteAndIncrementFile(hFile, p->usri1_name, dwUserNameLen, &OverlappedIOQUser);
+				dwAttrLen = wcsnlen_s(p->usri1_name, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, p->usri1_name, dwAttrLen, &OverlappedIOQUser);
 
 				// Full name:
 				lpwstrLabel = TEXT("\nFull Name: ");
-				DWORD dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+				dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
 				WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
-				DWORD dwFullNameLen = wcsnlen_s(p->usri1_full_name, maxCount) * sizeof(TCHAR);
-				WriteAndIncrementFile(hFile, p->usri1_full_name, dwFullNameLen, &OverlappedIOQUser);
+				dwAttrLen = wcsnlen_s(p->usri1_full_name, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, p->usri1_full_name, dwAttrLen, &OverlappedIOQUser);
+
+				// Comment:
+				lpwstrLabel = TEXT("\nComment: ");
+				dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
+				DWORD dwCommentNameLen = wcsnlen_s(p->usri1_comment, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, p->usri1_comment, dwAttrLen, &OverlappedIOQUser);
+
+				// User ID:
+				// What is the 11 'magic number' again?
+				errNo = _itow_s((int)p->usri1_user_id, (wchar_t*)lpwstrAttr, maxCount, 11);
+				if (errNo != 0) {
+					printError((TCHAR*)TEXT("Errno not zero after saving user ID to buffer."));
+				}
+				lpwstrLabel = TEXT("\nUser ID: ");
+				dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
+				dwAttrLen = wcsnlen_s(lpwstrAttr, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, lpwstrAttr, dwAttrLen, &OverlappedIOQUser);
+
+				// flags:
+				errNo = _itow_s((int)p->usri1_flags, (wchar_t*)lpwstrAttr, maxCount, 11);
+				if (errNo != 0) {
+					printError((TCHAR*)TEXT("Errno not zero after saving user ID to buffer."));
+				}
+				lpwstrLabel = TEXT("\nFlags: ");
+				dwLabelLen = wcsnlen_s(lpwstrLabel, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, lpwstrLabel, dwLabelLen, &OverlappedIOQUser);
+				dwAttrLen = wcsnlen_s(lpwstrAttr, maxCount) * sizeof(TCHAR);
+				WriteAndIncrementFile(hFile, lpwstrAttr, dwAttrLen, &OverlappedIOQUser);
 
 				//
 				// If there is more data, set the index.
