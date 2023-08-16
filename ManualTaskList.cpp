@@ -121,8 +121,15 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 	//USER_INFO_2 userInfo2;
 	LPBYTE* userInfo2 = (LPBYTE*) calloc(1, sizeof(USER_INFO_2));
 	DWORD dwUserInfoLevel2 = 2;
-	SESSION_INFO_502 si502;
+	//SESSION_INFO_502* si502 = (SESSION_INFO_502*) calloc(1, sizeof(SESSION_INFO_502));
+	LPSESSION_INFO_502 psi502 = (LPSESSION_INFO_502) calloc(1, sizeof(SESSION_INFO_502));
+	if (NULL == psi502)
+	{
+		printf("Why no psi502 calloc??");
+		return(FALSE);
+	}
 	DWORD dwReturnedEntryCount = 0;
+	DWORD dwTotalEntriesHint = 0;
 	const TCHAR* lpwstrLabel;
 	const TCHAR lpwstrAttr[1024] = { 0 };
 	DWORD dwLabelLen = 0;
@@ -131,6 +138,7 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 	char timebuf[26];
 	struct tm gmt = { 0,0,0,0,0,0 };
 	time_t ltime;
+	BOOL bRet = FALSE;
 
 	HANDLE hFile = CreateFile(
 		savePath,                // name of the write
@@ -157,8 +165,83 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 	//	[out] PVOID* SortedBuffer
 	//	);
 
-	DWORD status, index = 0;
+	DWORD status = -1;
+	DWORD index = 0;
 
+
+
+	/*BOOL WTSEnumerateSessionsA(
+	BOOL WTSEnumerateSessionsExW(
+  [in]      HANDLE               hServer,
+  [in, out] DWORD                *pLevel,
+  [in]      DWORD                Filter,
+  [out]     PWTS_SESSION_INFO_1W *ppSessionInfo,
+  [out]     DWORD                *pCount
+);
+);*/
+
+	DWORD level = 1;
+	DWORD dwPointerCount;
+	PWTS_SESSION_INFO_1W pwtsSessionInfo;
+	bRet = WTSEnumerateSessionsExW(
+		WTS_CURRENT_SERVER_HANDLE,
+		&level,
+		0,
+		(PWTS_SESSION_INFO_1W*)&pwtsSessionInfo,
+		&dwPointerCount
+	);
+
+	if (!bRet) {
+		printf("Sad. WTS Enumerate didn't work.");
+		return FALSE;
+	}
+
+	printf("WTS Enumerate information for %d records:\n--------------------------------\n", dwPointerCount);
+	
+	for (int i = 0; i < dwPointerCount; i++) {
+		WTS_SESSION_INFO_1W thisSessionInfo = pwtsSessionInfo[i];
+		wprintf(L"Exec Env Id: %u\n", thisSessionInfo.ExecEnvId);
+		wprintf(L"Session ID: %u\n", thisSessionInfo.SessionId);
+		wprintf(L"Session name: %s\n", thisSessionInfo.pSessionName);
+		wprintf(L"Host name: %s\n", thisSessionInfo.pHostName);
+		wprintf(L"User name: %s\n", thisSessionInfo.pUserName );
+		wprintf(L"Domain name: %s\n", thisSessionInfo.pDomainName );
+		wprintf(L"Farm name: %s\n", thisSessionInfo.pFarmName);
+		printf("\n\n");
+	}
+	
+
+
+	/*
+	do {
+		status = NetSessionEnum(
+			NULL,			// Local computer
+			NULL,			// Get info for all sessions
+			NULL,			// Get info for all users
+			502,			// Get SESSION_INFO_502 data
+			(LPBYTE*)psi502,
+			MAX_PREFERRED_LENGTH,
+			&dwReturnedEntryCount,
+			&dwTotalEntriesHint,
+			NULL			// Do I need a 'resume' handle??
+			);
+			
+		if ((status == NERR_Success) || (status == ERROR_MORE_DATA))
+		{
+			wprintf(L"Cname: %s\n", psi502->sesi502_cname);
+
+			
+		}
+		else
+			printf("Error: %u\n", status);
+		//
+		// Continue while there is more data.
+		//
+	} while (status == ERROR_MORE_DATA); // end do
+	if (NULL != psi502) {
+		NetApiBufferFree(psi502);
+	}
+	*/
 	do{
 		status = NetQueryDisplayInformation(
 			NULL,					// NULL queries local machine
@@ -258,18 +341,7 @@ BOOL SaveNetUserInfo(const TCHAR* savePath) {
 				}
 
 
-				/*NET_API_STATUS NET_API_FUNCTION NetSessionEnum(
-							  [in]      LMSTR   servername,
-							  [in]      LMSTR   UncClientName,
-							  [in]      LMSTR   username,
-							  [in]      DWORD   level,
-							  [out]     LPBYTE  *bufptr,
-							  [in]      DWORD   prefmaxlen,
-							  [out]     LPDWORD entriesread,
-							  [out]     LPDWORD totalentries,
-							  [in, out] LPDWORD resume_handle
-				);*/
-
+			
 
 
 				// Username
